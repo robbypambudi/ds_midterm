@@ -8,22 +8,24 @@ class Client:
     REQUEST_TIMEOUT = 1000
     MAX_RETRIES = 3
 
-    context = zmq.Context()
-
-    def __init__(self, endpoint: str) -> None:
-        self.endpoint = endpoint
+    def __init__(self, server_endpoint: str) -> None:
+        self.server_endpoint = server_endpoint
+        self.context = zmq.Context()
         self.client = self.context.socket(zmq.REQ)
         self.client_id = "%04X-%04X" % (randint(0, 0x10000), randint(0, 0x10000))
 
-        # sock options
-        self.client.setsockopt(zmq.LINGER, 0)
-
     def connect(self, msg: str):
-        print("I: Trying server at %s..." % self.endpoint)
+        print("I: Trying server at %s..." % self.server_endpoint)
+
+        split_msg = msg.split(" ")
+        bytes_msg: list[bytes] = []
+
+        for m in split_msg:
+            bytes_msg.append(m.encode())
 
         # try to connect and send the message
-        self.client.connect(self.endpoint)
-        self.client.send_string(msg)
+        self.client.connect(self.server_endpoint)
+        self.client.send_multipart(bytes_msg)
 
         # poll for response
         poll = zmq.Poller()
@@ -40,10 +42,14 @@ class Client:
 
         return reply
 
+    def destroy(self) -> None:
+        self.client.setsockopt(zmq.LINGER, 0)
+        self.client.close()
+        self.context.term()
+
 
 if __name__ == "__main__":
     endpoints = len(sys.argv) - 1
-    reply = None
 
     if endpoints == 0:
         print("I: syntax %s <endpoint> ..." % sys.argv[0])
@@ -53,14 +59,22 @@ if __name__ == "__main__":
         client = Client(endpoint)
 
         for retries in range(client.MAX_RETRIES):
-            reply = client.connect(f"hello world, this one is from {client.client_id}")
+            reply = client.connect("get temp.txt")
             if reply:
+                print("I: Server replied OK (%s)" % reply)
                 break
 
             print("W: No response from %s, retrying" % endpoint)
     else:
         for endpoint in sys.argv[1:]:
-            pass
+            client = Client(endpoint)
 
-    if reply:
-        print(f"I: Server replied OK with {reply}")
+            for retries in range(client.MAX_RETRIES):
+                reply = client.connect(
+                    f"hello world, this one is from {client.client_id}"
+                )
+                if reply:
+                    print("I: Server replied OK (%s)" % reply)
+                    break
+
+                print("W: No response from %s, retrying" % endpoint)

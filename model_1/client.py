@@ -1,80 +1,91 @@
-import sys
+import zmq
 from random import randint
 
-import zmq
+class Client: 
+  MAX_RETRIES = 10
+  MAX_REQUESTS_TIMEOUT = 3000
 
+  def __init__(self):
+    self.servers = 0
+    self.sequence = 0
+    self.context = zmq.Context()
+    self.socket = self.context.socket(zmq.REQ) 
+    self.client_id = "%04X-%04X" % (randint(0, 0x10000), randint(0, 0x10000))
 
-class Client:
-    REQUEST_TIMEOUT = 1000
-    MAX_RETRIES = 3
+    
+  def destroy(self):
+    self.socket.setsockopt(zmq.LINGER, 0)  # Terminate early
+    self.socket.close()
+    self.context.term()
+  
+  def connect(self, endpoint):
+    self.socket.connect(endpoint)
+    self.servers += 1
+    print("%s: Connected to %s" % (self.client_id, endpoint))
+  
+  def request(self, *request):
+    msg = [b""] + list(request)
+    self.socket.send_multipart(msg)
 
-    def __init__(self, server_endpoint: str) -> None:
-        self.server_endpoint = server_endpoint
-        self.context = zmq.Context()
-        self.client = self.context.socket(zmq.REQ)
-        self.client_id = "%04X-%04X" % (randint(0, 0x10000), randint(0, 0x10000))
+    poll = zmq.Poller()
+    poll.register(self.socket, zmq.POLLIN)
 
-    def connect(self, msg: str):
-        print("I: Trying server at %s..." % self.server_endpoint)
-
-        split_msg = msg.split(" ")
-        bytes_msg: list[bytes] = []
-
-        for m in split_msg:
-            bytes_msg.append(m.encode())
-
-        # try to connect and send the message
-        self.client.connect(self.server_endpoint)
-        self.client.send_multipart(bytes_msg)
-
-        # poll for response
-        poll = zmq.Poller()
-        poll.register(self.client, zmq.POLLIN)
-        socks = dict(poll.poll(self.REQUEST_TIMEOUT))
-
-        if socks.get(self.client) == zmq.POLLIN:
-            reply = self.client.recv_multipart()
-        else:
-            reply = ""
-
-        poll.unregister(self.client)
-        self.client.close()
-
-        return reply
-
-    def destroy(self) -> None:
-        self.client.setsockopt(zmq.LINGER, 0)
-        self.client.close()
-        self.context.term()
-
-
-if __name__ == "__main__":
-    endpoints = len(sys.argv) - 1
-
-    if endpoints == 0:
-        print("I: syntax %s <endpoint> ..." % sys.argv[0])
-    elif endpoints == 1:
-        endpoint = sys.argv[1]
-
-        client = Client(endpoint)
-
-        for retries in range(client.MAX_RETRIES):
-            reply = client.connect("get temp.txt")
-            if reply:
-                print("I: Server replied OK (%s)" % reply)
-                break
-
-            print("W: No response from %s, retrying" % endpoint)
+    socks = dict(poll.poll(self.MAX_REQUESTS_TIMEOUT))
+    if socks.get(self.socket) == zmq.POLLIN:
+      reply = self.socket.recv_multipart()
     else:
-        for endpoint in sys.argv[1:]:
-            client = Client(endpoint)
+      reply = None
+    return reply
 
-            for retries in range(client.MAX_RETRIES):
-                reply = client.connect(
-                    f"hello world, this one is from {client.client_id}"
-                )
-                if reply:
-                    print("I: Server replied OK (%s)" % reply)
-                    break
-
-                print("W: No response from %s, retrying" % endpoint)
+if __name__ == '__main__':
+  server_list = [
+    "tcp://192.168.18.71:5555",
+    "tcp://192.168.18.71:5557",
+  ]
+  
+  client = Client()
+  
+  endpoint = len(server_list) - 1
+  print("%s: Trying to connect to server..." % client.client_id)
+  client.connect(server_list[endpoint])
+  
+  while endpoint >= 0:
+    try :
+      # List Command
+      print("List of commands: ")
+      print("- HEALTH")
+      print("- LIST")
+      print("- LIST_ALL")
+      print("- DOWNLOAD <filename>")
+      print("- EXIT")
+      while True:
+        command = input("Enter your message: ")
+        if (input == "EXIT"):
+          raise Exception("Exiting the program")
+        
+        if command.startswith("DOWNLOAD"):
+          command = command.split(" ")
+          reply = client.request(command[0].encode(), command[1].encode())
+          
+          with open(f"client_{command[1]}", "wb") as f:
+            f.write(reply[0])
+          
+          print(f"Downloaded {command[1]}")
+          continue
+        else:
+          reply = client.request(command.encode())   
+          if not reply:
+            print("E: No response from server")
+            break
+          for i in range(len(reply)):
+            if i == 0:
+              print("Server: %s" % reply[i].decode())
+            else:
+              print("Message: %s" % reply[i].decode())
+      
+    except Exception as e:
+      print("E: Couldn't connect to server %s" % server_list[endpoint])
+      print("E: %s" % e)
+      endpoint -= 1
+      client.connect(server_list[endpoint])
+      continue

@@ -4,20 +4,29 @@ import sys
 import zmq
 
 
+class RETURN_VALUE:
+    ERR_STRING = "ERROR"
+    SUCCESS_STRING = "SUCCESS"
+
+    ERR_BYTES = ERR_STRING.encode()
+    SUCCESS_BYTES = SUCCESS_STRING.encode()
+
+
 class Server:
     SHARED_DIR = os.getcwd() + os.sep + "shared"
 
-    def __init__(self, endpoint: str) -> None:
-        self.endpoint = endpoint
-        self.context = zmq.Context()
-        self.server = self.context.socket(zmq.REP)
+    def __init__(self, machine_name: str, endpoint: str) -> None:
+        self.__machine_name = machine_name
+        self.__endpoint = endpoint
+        self.__context = zmq.Context()
+        self.__server = self.__context.socket(zmq.REP)
 
-        self.server.bind(endpoint)
+        self.__server.bind(endpoint)
 
     def destroy(self) -> None:
-        self.server.setsockopt(zmq.LINGER, 0)
-        self.server.close()
-        self.context.term()
+        self.__server.setsockopt(zmq.LINGER, 0)
+        self.__server.close()
+        self.__context.term()
 
     def list_all_files(self, include_hidden=False) -> list[bytes]:
         all_files: list[bytes] = []
@@ -33,45 +42,66 @@ class Server:
         return all_files
 
     def start_server(self) -> None:
-        print(f"I: Starting server at {self.endpoint}")
+        print(f"I: Starting server at {self.__endpoint}")
 
         while True:
-            msg = self.server.recv_multipart()
+            msg = self.__server.recv_multipart()
 
             if not msg:
                 break
 
             print(f"I: Received message: {msg}")
 
-            match msg[0].decode():
-                case "check":
-                    self.server.send(b"OK")
+            match msg[1].decode():
+                case "HEALTH":
+                    self.__server.send_multipart([RETURN_VALUE.SUCCESS_BYTES, b"OK"])
+
                 # list files without hidden files
-                case "list":
+                case "LIST":
                     files = self.list_all_files()
-                    self.server.send_multipart(files)
+                    self.__server.send_multipart(
+                        [RETURN_VALUE.SUCCESS_BYTES, self.__machine_name.encode()]
+                        + files
+                    )
+
                 # list files with hidden files
-                case "list_all":
+                case "LIST_ALL":
                     files = self.list_all_files(include_hidden=True)
-                    self.server.send_multipart(files)
-                case "get":
+                    self.__server.send_multipart(
+                        [RETURN_VALUE.SUCCESS_BYTES, self.__machine_name.encode()]
+                        + files
+                    )
+
+                case "DOWNLOAD":
                     # check if the filename is provided
-                    if not msg[1]:
-                        self.server.send(b"Filename not provided")
+                    if len(msg) != 3:
+                        self.__server.send_multipart([b"Filename not provided"])
+                        continue
 
-                    filename = msg[1].decode()
+                    filename = msg[2].decode()
+
+                    # check if file exists
                     if not os.path.exists(self.SHARED_DIR + os.sep + filename):
-                        self.server.send(b"File not found")
+                        self.__server.send_multipart([b"File not found"])
+                        continue
 
-                    self.server.send(b"File found")
+                    # send the
+                    with open(self.SHARED_DIR + os.sep + filename, "rb") as f:
+                        data = f.read(1024)
+                        while data:
+                            self.__server.send_multipart([data])
+                            data = f.read(1024)
+
                 case _:
-                    self.server.send(b"Invalid command")
+                    self.__server.send_multipart([b"Invalid command"])
+
+        self.destroy()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(f"I: Syntax: {sys.argv[0]} <endpoint>")
+    if len(sys.argv) < 3:
+        print(f"I: Syntax: {sys.argv[0]} <machine_name> <endpoint>")
         sys.exit(0)
 
-    server = Server(sys.argv[1])
+    server = Server(sys.argv[1], sys.argv[2])
     server.start_server()

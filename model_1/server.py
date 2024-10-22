@@ -52,48 +52,40 @@ class Server:
 
             print(f"I: Received message: {msg}")
 
-            match msg[1].decode():
-                case "HEALTH":
-                    self.__server.send_multipart([RETURN_VALUE.SUCCESS_BYTES, b"OK"])
+            command = msg[1].decode()
+            if command == "HEALTH":
+                self.__server.send_multipart([RETURN_VALUE.SUCCESS_BYTES, b"OK"])
+            elif command == "LIST":
+                files = self.list_all_files()
+                self.__server.send_multipart(
+                    [RETURN_VALUE.SUCCESS_BYTES, self.__machine_name.encode()] + files
+                )
+            elif command == "LIST_ALL":
+                files = self.list_all_files(include_hidden=True)
+                self.__server.send_multipart(
+                    [RETURN_VALUE.SUCCESS_BYTES, self.__machine_name.encode()] + files
+                )
+            elif command == "DOWNLOAD":
+                # check if the filename is provided
+                if len(msg) != 3:
+                    self.__server.send_multipart([b"Filename not provided"])
+                    continue
 
-                # list files without hidden files
-                case "LIST":
-                    files = self.list_all_files()
-                    self.__server.send_multipart(
-                        [RETURN_VALUE.SUCCESS_BYTES, self.__machine_name.encode()]
-                        + files
-                    )
+                filename = msg[2].decode()
 
-                # list files with hidden files
-                case "LIST_ALL":
-                    files = self.list_all_files(include_hidden=True)
-                    self.__server.send_multipart(
-                        [RETURN_VALUE.SUCCESS_BYTES, self.__machine_name.encode()]
-                        + files
-                    )
+                # check if file exists
+                if not os.path.exists(self.SHARED_DIR + os.sep + filename):
+                    self.__server.send_multipart([b"File not found"])
+                    continue
 
-                case "DOWNLOAD":
-                    # check if the filename is provided
-                    if len(msg) != 3:
-                        self.__server.send_multipart([b"Filename not provided"])
-                        continue
-
-                    filename = msg[2].decode()
-
-                    # check if file exists
-                    if not os.path.exists(self.SHARED_DIR + os.sep + filename):
-                        self.__server.send_multipart([b"File not found"])
-                        continue
-
-                    # send the
-                    with open(self.SHARED_DIR + os.sep + filename, "rb") as f:
+                # send the
+                with open(self.SHARED_DIR + os.sep + filename, "rb") as f:
+                    data = f.read(1024)
+                    while data:
+                        self.__server.send_multipart([data])
                         data = f.read(1024)
-                        while data:
-                            self.__server.send_multipart([data])
-                            data = f.read(1024)
-
-                case _:
-                    self.__server.send_multipart([b"Invalid command"])
+            else:
+                self.__server.send_multipart([b"Invalid command"])
 
         self.destroy()
 

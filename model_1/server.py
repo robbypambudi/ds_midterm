@@ -81,6 +81,8 @@ class Server:
                 machine = msg[2].decode()
                 filename = msg[3].decode()
 
+                msg = [self.machine_name.encode()]
+
                 if self.machine_name != machine:
                     self.__server.send_multipart(
                         [
@@ -107,9 +109,16 @@ class Server:
                 # send the file
                 with open(self.SHARED_DIR + os.sep + filename, "rb") as f:
                     data = f.read(1024)
-                    while data:
-                        self.__server.send_multipart([data])
-                        data = f.read(1024)
+                    if data:
+                        msg += [RETURN_VALUE.SUCCESS_BYTES]
+
+                        while data:
+                            msg += [data]
+                            data = f.read(1024)
+
+                        self.__server.send_multipart(msg)
+                    else:
+                        self.__server.send_multipart(msg + [RETURN_VALUE.SUCCESS_BYTES])
 
             else:
                 print(f"E: Invalid command, sending reply to {client_id}")

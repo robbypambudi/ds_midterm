@@ -92,7 +92,8 @@ if __name__ == "__main__":
                             all_replies.append(server_reply)
                             break
 
-                print(all_replies)
+                for reply in all_replies:
+                    print(f"Server {reply[0].decode()} is {reply[2].decode()}")
 
             elif command[0] == "LIST":
                 for server in client.server_list:
@@ -103,7 +104,10 @@ if __name__ == "__main__":
                             all_replies.append(server_reply)
                             break
 
-                print(all_replies)
+                for reply in all_replies:
+                    print(f"Files in server {reply[0].decode()}:")
+                    for filename in reply[2:]:
+                        print(filename.decode())
 
             elif command[0] == "LIST_ALL":
                 for server in client.server_list:
@@ -114,7 +118,10 @@ if __name__ == "__main__":
                             all_replies.append(server_reply)
                             break
 
-                print(all_replies)
+                for reply in all_replies:
+                    print(f"Files in server {reply[0].decode()}:")
+                    for filename in reply[2:]:
+                        print(filename.decode())
 
             elif command[0] == "DOWNLOAD":
                 for server in client.server_list:
@@ -133,11 +140,11 @@ if __name__ == "__main__":
                     ):
                         continue
                     else:
-                        with open(command[1] + "_" + command[2], "wb") as f:
-                            f.write(reply[0])
-
-                print(all_replies)
-
+                        if len(reply) != 2:
+                            with open(command[1] + "_" + command[2], "wb") as f:
+                                f.write(reply[2])
+                        else:
+                            open(command[1] + "_" + command[2], "a")
             else:
                 for server in client.server_list:
                     server_reply = client.send_request(server, bytes_command)

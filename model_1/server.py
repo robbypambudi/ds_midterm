@@ -55,8 +55,8 @@ class Server:
 
             print(f"I: Received message: {msg}")
 
-            command = msg[1].decode()
             client_id = msg[0].decode()
+            command = msg[1].decode()
 
             if command == "HEALTH":
                 print(f"I: Sending reply to {client_id}")

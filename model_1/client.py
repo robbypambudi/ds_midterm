@@ -1,4 +1,3 @@
-import os
 import sys
 from random import randint
 
@@ -18,48 +17,40 @@ class Client:
     MAX_REQUESTS_TIMEOUT = 3000
 
     def __init__(self, server_list: list[str]) -> None:
-        self.__server_list = server_list
+        self.server_list = server_list
 
-        # define the variable data type only
-        self.__context = zmq.Context()
-        self.__client: zmq.SyncSocket
-        self.__poller = zmq.Poller()
-        self.__sockets = dict()
-
+        # client identifier
         self.client_id = "%04X-%04X" % (randint(0, 0x10000), randint(0, 0x10000))
 
-    def destroy(self):
-        self.__client.setsockopt(zmq.LINGER, 0)  # Terminate early
-        self.__client.close()
+        # socket configuration
+        self.__context = zmq.Context()
+
+    def destroy(self, client: zmq.Socket) -> None:
+        client.setsockopt(zmq.LINGER, 0)
+        client.close()
+        return
+
+    def exit(self) -> None:
         self.__context.term()
+        return
 
-    def send_request(self, *request):
-        reply = list()
+    def send_request(self, endpoint, request: list):
+        client_socket = self.__context.socket(zmq.REQ)
+        client_socket.connect(endpoint)
 
-        for endpoint in self.__server_list:
-            server_reply: list[bytes] = []
+        msg = [self.client_id.encode()] + request
+        client_socket.send_multipart(msg)
 
-            for _ in range(client.MAX_RETRIES):
-                print("%s: Connecting to %s" % (self.client_id, endpoint))
-                self.__client = self.__context.socket(zmq.REQ)
-                self.__client.connect(endpoint)
+        poll = zmq.Poller()
+        poll.register(client_socket, zmq.POLLIN)
 
-                msg = [self.client_id.encode()] + list(request)
-                self.__client.send_multipart(msg)
+        socks = dict(poll.poll(self.MAX_REQUESTS_TIMEOUT))
+        if socks.get(client_socket) == zmq.POLLIN:
+            reply = client_socket.recv_multipart()
+        else:
+            reply = None
 
-                self.__poller.register(self.__client, zmq.POLLIN)
-                self.__sockets.update(self.__poller.poll(self.MAX_REQUESTS_TIMEOUT))
-
-                if self.__sockets.get(self.__client) == zmq.POLLIN:
-                    server_reply = self.__client.recv_multipart()
-
-                if server_reply:
-                    reply.append(server_reply)
-                    self.__poller.unregister(self.__client)
-                    break
-
-            if server_reply == []:
-                print(f"E: Server {endpoint} seems to be offline")
+        self.destroy(client_socket)
 
         return reply
 
@@ -73,6 +64,8 @@ if __name__ == "__main__":
     print(f"I: Client started: ID: {client.client_id}")
 
     while True:
+        all_replies: list = []
+
         # List Command
         print("List of commands: ")
         print("- HEALTH")
@@ -80,45 +73,76 @@ if __name__ == "__main__":
         print("- LIST_ALL")
         print("- DOWNLOAD <filename>")
         print("- EXIT")
-        command = input("Enter your command: ")
+        command = input("Enter your command: ").split(" ")
+        bytes_command: list[bytes] = []
+        for i in range(0, len(command)):
+            bytes_command.append(command[i].encode())
 
         try:
-            if command == "EXIT":
+            if command[0] == "EXIT":
                 print("I: Exiting program...")
-                client.destroy()
-                os._exit(os.EX_OK)
-            elif command == "HEALTH":
-                res = client.send_request(command.encode())
-                for reply in res:
-                    print(f"M: server {reply[0].decode()} status: {reply[1].decode()}")
-                    print(f"M: reply: {reply[2].decode()}")
-            elif command == "LIST" or command == "LIST_ALL":
-                res = client.send_request(command.encode())
-                for reply in res:
-                    print(f"M: server {reply[0].decode()} status: {reply[1].decode()}")
-                    for filename in reply[2:]:
-                        print(f"M: Files: {filename.decode()}")
-            elif command.startswith("DOWNLOAD"):
-                command = command.split(" ")
-                
-                if len(command) != 3:
-                    print("E: DOWNLOAD <machine_name> <filename>")
-                    continue
+                client.exit()
+                sys.exit(0)
+            elif command[0] == "HEALTH":
+                for server in client.server_list:
+                    for retry in range(client.MAX_RETRIES):
+                        server_reply = client.send_request(server, bytes_command)
 
-                res = client.send_request(
-                    command[0].encode(), command[1].encode(), command[2].encode()
-                )
+                        if server_reply:
+                            all_replies.append(server_reply)
+                            break
 
-                if res[1] == RETURN_VALUE.ERR_BYTES:
-                    print(f"E: Cannot download the file: {res[2].decode()}")
-                else:
-                    with open(f"client_{command[1]}_{command[2]}", "wb") as f:
-                        f.write(res[0][0])
+                print(all_replies)
+
+            elif command[0] == "LIST":
+                for server in client.server_list:
+                    for retry in range(client.MAX_RETRIES):
+                        server_reply = client.send_request(server, bytes_command)
+
+                        if server_reply:
+                            all_replies.append(server_reply)
+                            break
+
+                print(all_replies)
+
+            elif command[0] == "LIST_ALL":
+                for server in client.server_list:
+                    for retry in range(client.MAX_RETRIES):
+                        server_reply = client.send_request(server, bytes_command)
+
+                        if server_reply:
+                            all_replies.append(server_reply)
+                            break
+
+                print(all_replies)
+
+            elif command[0] == "DOWNLOAD":
+                for server in client.server_list:
+                    for retry in range(client.MAX_RETRIES):
+                        server_reply = client.send_request(server, bytes_command)
+
+                        if server_reply:
+                            all_replies.append(server_reply)
+                            break
+
+                for reply in all_replies:
+                    if (
+                        len(reply) == 3
+                        and reply[1] == b"ERROR"
+                        and reply[2] == b"Not this one"
+                    ):
+                        continue
+                    else:
+                        with open(command[1] + "_" + command[2], "wb") as f:
+                            f.write(reply[0])
+
+                print(all_replies)
 
             else:
-                print("E: Invalid command")
+                for server in client.server_list:
+                    server_reply = client.send_request(server, bytes_command)
+                    all_replies.append(server_reply)
 
         except Exception as e:
             print(f"E: {e}")
-            client.destroy()
             sys.exit(1)

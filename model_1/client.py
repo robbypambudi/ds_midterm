@@ -1,8 +1,16 @@
 import sys
 from random import randint
+from tabulate import tabulate
 
 import zmq
+import time
 
+def loading_animation():
+    for _ in range(3):  # Ulangi beberapa kali
+        for dot in [".  ", ".. ", "..."]:
+            sys.stdout.write(f"\rLoading{dot}")
+            sys.stdout.flush()
+            time.sleep(0.2)
 
 class RETURN_VALUE:
     ERR_STRING = "ERROR"
@@ -87,27 +95,47 @@ if __name__ == "__main__":
                 for server in client.server_list:
                     for retry in range(client.MAX_RETRIES):
                         server_reply = client.send_request(server, bytes_command)
+                        print(f"Server: {server}")
 
                         if server_reply:
-                            all_replies.append(server_reply)
+                            print(f"Reply: {f'{server_reply[2].decode()}'}")
                             break
-
-                for reply in all_replies:
-                    print(f"Server {reply[0].decode()} is {reply[2].decode()}")
-
+                        else :
+                            print(f"Server {server} is not available")
+                            print("Trying reconnecting...")
+                print("")
+                    
             elif command[0] == "LIST":
+                # Inisialisasi daftar data di luar loop server
+                all_data = []
+
                 for server in client.server_list:
+                    headers = ["MESIN", "FILES"]
+                    data = []
+
                     for retry in range(client.MAX_RETRIES):
                         server_reply = client.send_request(server, bytes_command)
 
                         if server_reply:
-                            all_replies.append(server_reply)
-                            break
+                            # Ambil nama mesin
+                            mesin_name = server_reply[0].decode()
 
-                for reply in all_replies:
-                    print(f"Files in server {reply[0].decode()}:")
-                    for filename in reply[2:]:
-                        print(filename.decode())
+                            # Ambil daftar file dari reply dan tambahkan ke data
+                            for i in range(2, len(server_reply)):
+                                file_name = server_reply[i].decode()
+                                data.append([mesin_name, file_name])
+
+                            break
+                        else:
+                            print(f"Server {server} is not available")
+                            print("Trying reconnecting...")
+
+                    # Jika data tidak kosong, tambahkan ke all_data dan tampilkan tabel
+                    if data:
+                        all_data.extend(data)
+                        print("Server: ", server)
+                        print(tabulate(data, headers, tablefmt="grid"))
+                        print("")
 
             elif command[0] == "LIST_ALL":
                 for server in client.server_list:
@@ -131,20 +159,36 @@ if __name__ == "__main__":
                         if server_reply:
                             all_replies.append(server_reply)
                             break
-
+                print("Downloading file...")                
+                failedFlag = 0
                 for reply in all_replies:
                     if (
                         len(reply) == 3
                         and reply[1] == b"ERROR"
                         and reply[2] == b"Not this one"
                     ):
+                        failedFlag += 1
                         continue
+                    # elif File not found
+                    elif (
+                        len(reply) == 3
+                        and reply[1] == b"ERROR"
+                        and reply[2] == b"File not found"
+                    ):
+                        print(reply[0].decode() +  ": File not found")
+                        break
                     else:
                         if len(reply) != 2:
                             with open(command[1] + "_" + command[2], "wb") as f:
                                 f.write(reply[2])
+
                         else:
-                            open(command[1] + "_" + command[2], "a")
+                            open(command[1] + "_" + command[2], "a").close()
+                        print(f"File {command[1]} downloaded")
+                
+                if failedFlag == len(all_replies):
+                    print("File not found in all servers")
+                print("")        
             else:
                 for server in client.server_list:
                     server_reply = client.send_request(server, bytes_command)

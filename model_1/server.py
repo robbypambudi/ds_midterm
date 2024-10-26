@@ -13,7 +13,7 @@ class RETURN_VALUE:
 
 
 class Server:
-    SHARED_DIR = os.getcwd() + os.sep + "shared"
+    SHARED_DIR = os.getcwd() + os.sep + "shared2"
 
     def __init__(self, machine_name: str, endpoint: str) -> None:
         self.machine_name = machine_name
@@ -78,6 +78,7 @@ class Server:
                 self.__server.send_multipart(
                     [self.machine_name.encode(), RETURN_VALUE.SUCCESS_BYTES] + files
                 )
+                
             elif command == "DOWNLOAD":
                 machine = msg[2].decode()
                 filename = msg[3].decode()

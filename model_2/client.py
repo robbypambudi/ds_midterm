@@ -1,96 +1,115 @@
-import time
-import zmq
+import sys
 from random import randint
 
-class Client: 
-  MAX_RETRIES = 10
-  MAX_REQUESTS_TIMEOUT = 3000
+import zmq
 
-  def __init__(self, servers):
-    self.servers = 0
-    self.sequence = 0
-    self.context = zmq.Context()
-    self.socket = self.context.socket(zmq.DEALER)
-    self.client_id = "%04X-%04X" % (randint(0, 0x10000), randint(0, 0x10000))
 
-    
-  def destroy(self):
-    self.socket.setsockopt(zmq.LINGER, 0)  # Terminate early
-    self.socket.close()
-    self.context.term()
-  
-  def connect(self, endpoint):
-    self.socket.connect(endpoint)
-    self.servers += 1
-    print("%s: Connected to %s" % (self.client_id, endpoint))
-  
-  def request(self, *request):
-    self.sequence += 1
-    msg = [b"", str(self.sequence).encode()] + list(request)
-    
-    for server in range(self.servers):
-        self.socket.send_multipart(msg)
+class RETURN_VALUE:
+    ERR_STRING = "ERROR"
+    SUCCESS_STRING = "SUCCESS"
 
-    poll = zmq.Poller()
-    poll.register(self.socket, zmq.POLLIN)
+    ERR_BYTES = ERR_STRING.encode()
+    SUCCESS_BYTES = SUCCESS_STRING.encode()
 
-    socks = dict(poll.poll(self.MAX_REQUESTS_TIMEOUT))
-    
-    reply = None
-    endtime = time.time() + self.MAX_REQUESTS_TIMEOUT / 1000
-    while time.time() < endtime:
-      socks = dict(poll.poll((endtime - time.time()) * 1000))
-      if socks.get(self.socket) == zmq.POLLIN:
-        reply = self.socket.recv_multipart()
-        # assert len(reply) == 3
-        sequence = int(reply[1])
-        if sequence == self.sequence:
-          break
-    return reply
 
-if __name__ == '__main__':
-  server_list = [
-    "tcp://192.168.1.43:5555",
-    "tcp://192.168.1.43:5556",
-    "tcp://192.168.1.43:5557",
-  ]
-  
-  client = Client(servers=server_list)
-  
-  endpoint = len(server_list) - 1
-  print("%s: Trying to connect to server..." % client.client_id)
+class Client:
+    MAX_REQUESTS_TIMEOUT = 1000
 
-  for server in server_list:
-      client.connect(server)
-  
-  print("List of commands: ")
-  print("- HEALTH")
-  print("- LIST")
-  print("- LIST_ALL")
-  print("- DOWNLOAD <filename>")
-  print("- EXIT")
-  while True:
-      command = input("Enter your message: ")
-      if (input == "EXIT"):
-          raise Exception("Exiting the program")
-      
-      if command.startswith("DOWNLOAD"):
-          command = command.split(" ")
-          reply = client.request(command[0].encode(), command[1].encode())
-          
-          with open(f"client_{command[1]}", "wb") as f:
-              f.write(reply[0])
-          
-          print(f"Downloaded {command[1]}")
-          continue
-      else:
-          reply = client.request(command.encode())   
-          if not reply:
-              print("E: No response from server")
-              break
-          for i in range(len(reply)):
-              if i == 0:
-                  continue
-              else:
-                  print("Message: %s" % reply[i].decode())
-    
+    def __init__(self, endpoint_list: list[str]) -> None:
+        self.endpoint_list = endpoint_list
+        self.sequence = 0
+
+        # client identifier
+        self.client_id = "%04X-%04X" % (randint(0, 0x10000), randint(0, 0x10000))
+
+        # socket configuration
+        self.__context = zmq.Context()
+        self.__socket = self.__context.socket(zmq.DEALER)
+
+    def destroy(self) -> None:
+        # close the socket
+        self.__socket.setsockopt(zmq.LINGER, 0)  # Terminate early
+        self.__socket.close()
+        self.__context.term()
+
+        return
+
+    def connect(self, endpoint: str) -> None:
+        self.__socket.connect(endpoint)
+        print(f"{self.client_id}: Connected to {endpoint}")
+
+    def send_request(self, request: list):
+        reply: list = []
+        self.sequence += 1
+        msg = [b"", self.client_id.encode(), str(self.sequence).encode()] + request
+        print(f"I: Sending request {msg}")
+
+        for server in range(len(self.endpoint_list)):
+            self.__socket.send_multipart(msg)
+            print(f"I: {self.client_id}: Sent request to {self.endpoint_list[server]}")
+
+        poll = zmq.Poller()
+        poll.register(self.__socket, zmq.POLLIN)
+
+        for _ in range(len(self.endpoint_list)):
+            socks = dict(poll.poll(self.MAX_REQUESTS_TIMEOUT))
+            if socks.get(self.__socket) == zmq.POLLIN:
+                temp = self.__socket.recv_multipart()
+                if self.sequence == int(temp[2].decode()):
+                    reply.append(temp)
+
+        poll.unregister(self.__socket)
+
+        return reply
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        print(f"E: Syntax: {sys.argv[0]} <server_endpoint>...")
+        sys.exit(1)
+
+    client = Client(sys.argv[1:])
+    print(f"I: Client started: ID: {client.client_id}")
+
+    for server in client.endpoint_list:
+        client.connect(server)
+
+    while True:
+        print("List of commands: ")
+        print("- HEALTH")
+        print("- LIST")
+        print("- LIST_ALL")
+        print("- DOWNLOAD <filename>")
+        print("- EXIT")
+        command = input("Enter your message: ").split(" ")
+        bytes_command: list[bytes] = []
+        for i in range(0, len(command)):
+            bytes_command.append(command[i].encode())
+
+        try:
+            if command[0] == "EXIT":
+                print("I: Exiting program...")
+                client.destroy()
+                sys.exit(0)
+            elif command[0] == "HEALTH":
+                reply = client.send_request([bytes_command[0]])
+                print("Reply: ", reply)
+            elif command[0] == "LIST" or command[0] == "LIST_ALL":
+                reply = client.send_request([bytes_command[0]])
+                print("Reply: ", reply)
+            elif command[0] == "DOWNLOAD":
+                reply = client.send_request(bytes_command)
+                print("Reply: ", reply)
+                for r in reply:
+                    if r[3] == RETURN_VALUE.SUCCESS_BYTES and len(r) == 4:
+                        open(command[1] + "_" + command[2], "wb")
+                    elif r[3] == RETURN_VALUE.SUCCESS_BYTES and len(r) != 4:
+                        with open(command[1] + "_" + command[2], "wb") as f:
+                            for i in range(4, len(r)):
+                                f.write(r[i])
+            else:
+                reply = client.send_request([bytes_command[0]])
+                print("Reply: ", reply)
+        except Exception as e:
+            print(f"E: {e}")
+            sys.exit(1)

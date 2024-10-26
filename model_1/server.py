@@ -28,8 +28,9 @@ class Server:
         # destroy server
         self.__server.setsockopt(zmq.LINGER, 0)
         self.__server.close()
-
         self.__context.term()
+
+        return
 
     def list_all_files(self, include_hidden=False) -> list[bytes]:
         all_files: list[bytes] = []

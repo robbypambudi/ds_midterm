@@ -21,14 +21,14 @@ class Server:
         self.__context = zmq.Context()
         self.__server = self.__context.socket(zmq.REP)
 
-        self.__server.setsockopt(zmq.LINGER, 0)
-
         self.__server.bind(endpoint)
 
     def destroy(self) -> None:
         self.__server.setsockopt(zmq.LINGER, 0)
         self.__server.close()
         self.__context.term()
+
+        return
 
     def list_all_files(self, include_hidden=False) -> list[bytes]:
         all_files: list[bytes] = []
@@ -48,22 +48,19 @@ class Server:
 
         while True:
             msg = self.__server.recv_multipart()
-
             if not msg:
                 break
 
-            assert len(msg) == 2
-
             print(f"I: Received message: {msg}")
 
-            address = msg[0]
-            command = msg[1].decode()
+            sequence = msg[1].decode()
+            command = msg[2].decode()
 
             if command == "HEALTH":
                 self.__server.send_multipart(
                     [
-                        address,
                         self.__machine_name.encode(),
+                        sequence.encode(),
                         RETURN_VALUE.SUCCESS_BYTES,
                         b"OK",
                     ]
@@ -71,54 +68,78 @@ class Server:
             elif command == "LIST":
                 files = self.list_all_files()
                 self.__server.send_multipart(
-                    [address, self.__machine_name.encode(), RETURN_VALUE.SUCCESS_BYTES]
+                    [
+                        self.__machine_name.encode(),
+                        sequence.encode(),
+                        RETURN_VALUE.SUCCESS_BYTES,
+                    ]
                     + files
                 )
             elif command == "LIST_ALL":
                 files = self.list_all_files(include_hidden=True)
                 self.__server.send_multipart(
-                    [address, self.__machine_name.encode(), RETURN_VALUE.SUCCESS_BYTES]
+                    [
+                        self.__machine_name.encode(),
+                        sequence.encode(),
+                        RETURN_VALUE.SUCCESS_BYTES,
+                    ]
                     + files
                 )
             elif command == "DOWNLOAD":
-                if len(msg) != 3:
+                if len(msg) != 5:
                     self.__server.send_multipart(
                         [
-                            address,
                             self.__machine_name.encode(),
+                            sequence.encode(),
                             RETURN_VALUE.ERR_BYTES,
-                            b"Filename not provided",
+                            b"DOWNLOAD <machine_name> <filename>",
                         ]
                     )
                     continue
 
-                filename = msg[3].decode()
+                if msg[3].decode() != self.__machine_name:
+                    self.__server.send_multipart(
+                        [
+                            self.__machine_name.encode(),
+                            sequence.encode(),
+                            RETURN_VALUE.ERR_BYTES,
+                            b"Not this one",
+                        ]
+                    )
+                    continue
+
+                filename = msg[4].decode()
 
                 if not os.path.exists(self.SHARED_DIR + os.sep + filename):
                     self.__server.send_multipart(
                         [
-                            address,
                             self.__machine_name.encode(),
+                            sequence.encode(),
                             RETURN_VALUE.ERR_BYTES,
                             b"File not found",
                         ]
                     )
                     continue
 
-                self.__server.send_multipart(
-                    [address, self.__machine_name.encode(), RETURN_VALUE.SUCCESS_BYTES]
-                )
+                msg = [
+                    self.__machine_name.encode(),
+                    sequence.encode(),
+                    RETURN_VALUE.SUCCESS_BYTES,
+                ]
 
                 with open(self.SHARED_DIR + os.sep + filename, "rb") as f:
                     data = f.read(1024)
-                    while data:
-                        self.__server.send_multipart([data])
-                        data = f.read(1024)
+                    if data:
+                        while data:
+                            msg += [data]
+                            data = f.read(1024)
+
+                    self.__server.send_multipart(msg)
             else:
                 self.__server.send_multipart(
                     [
-                        address,
                         self.__machine_name.encode(),
+                        sequence.encode(),
                         RETURN_VALUE.ERR_BYTES,
                         b"Invalid command",
                     ]

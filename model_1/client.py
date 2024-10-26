@@ -138,18 +138,36 @@ if __name__ == "__main__":
                         print("")
 
             elif command[0] == "LIST_ALL":
+                # Inisialisasi daftar data di luar loop server
+                all_data = []
+
                 for server in client.server_list:
+                    headers = ["MESIN", "FILES"]
+                    data = []
+
                     for retry in range(client.MAX_RETRIES):
                         server_reply = client.send_request(server, bytes_command)
 
                         if server_reply:
-                            all_replies.append(server_reply)
-                            break
+                            # Ambil nama mesin
+                            mesin_name = server_reply[0].decode()
 
-                for reply in all_replies:
-                    print(f"Files in server {reply[0].decode()}:")
-                    for filename in reply[2:]:
-                        print(filename.decode())
+                            # Ambil daftar file dari reply dan tambahkan ke data
+                            for i in range(2, len(server_reply)):
+                                file_name = server_reply[i].decode()
+                                data.append([mesin_name, file_name])
+
+                            break
+                        else:
+                            print(f"Server {server} is not available")
+                            print("Trying reconnecting...")
+
+                    # Jika data tidak kosong, tambahkan ke all_data dan tampilkan tabel
+                    if data:
+                        all_data.extend(data)
+                        print("Server: ", server)
+                        print(tabulate(data, headers, tablefmt="grid"))
+                        print("")
 
             elif command[0] == "DOWNLOAD":
                 for server in client.server_list:

@@ -93,7 +93,7 @@ if __name__ == "__main__":
                 client.destroy()
                 sys.exit(0)
             elif command[0] == "HEALTH":
-                headers = ["MESIN", "FILES"]
+                headers = ["MESIN", "STATUS"]
                 data = []
 
                 replies = client.send_request([bytes_command[0]])

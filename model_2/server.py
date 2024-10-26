@@ -13,7 +13,7 @@ class RETURN_VALUE:
 
 
 class Server:
-    SHARED_DIR = os.getcwd() + os.sep + "shared"
+    SHARED_DIR = os.getcwd() + os.sep + "shared2"
 
     def __init__(self, machine_name: str, endpoint: str) -> None:
         self.__machine_name = machine_name

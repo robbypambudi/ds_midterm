@@ -2,6 +2,7 @@ import sys
 from random import randint
 
 import zmq
+from tabulate import tabulate
 
 
 class RETURN_VALUE:
@@ -92,15 +93,38 @@ if __name__ == "__main__":
                 client.destroy()
                 sys.exit(0)
             elif command[0] == "HEALTH":
-                reply = client.send_request([bytes_command[0]])
-                print("Reply: ", reply)
+                headers = ["MESIN", "FILES"]
+                data = []
+
+                replies = client.send_request([bytes_command[0]])
+                for reply in replies:
+                    data.append([reply[1].decode(), reply[4].decode()])
+
+                print(tabulate(data, headers, tablefmt="grid"))
+                print("")
             elif command[0] == "LIST" or command[0] == "LIST_ALL":
-                reply = client.send_request([bytes_command[0]])
-                print("Reply: ", reply)
+                headers = ["MESIN", "FILES"]
+                data = []
+
+                replies = client.send_request([bytes_command[0]])
+                for reply in replies:
+                    temp_data = [reply[1].decode()]
+                    filenames = ""
+
+                    for i in reply[4:-1]:
+                        filenames += i.decode() + ", "
+                    filenames += reply[-1].decode()
+
+                    temp_data.append(filenames)
+                    data.append(temp_data)
+
+                print(tabulate(data, headers, tablefmt="grid"))
+                print("")
+
             elif command[0] == "DOWNLOAD":
-                reply = client.send_request(bytes_command)
-                print("Reply: ", reply)
-                for r in reply:
+                replies = client.send_request(bytes_command)
+                print("Reply: ", replies)
+                for r in replies:
                     if r[3] == RETURN_VALUE.SUCCESS_BYTES and len(r) == 4:
                         open(command[1] + "_" + command[2], "wb")
                     elif r[3] == RETURN_VALUE.SUCCESS_BYTES and len(r) != 4:
@@ -108,8 +132,8 @@ if __name__ == "__main__":
                             for i in range(4, len(r)):
                                 f.write(r[i])
             else:
-                reply = client.send_request([bytes_command[0]])
-                print("Reply: ", reply)
+                replies = client.send_request([bytes_command[0]])
+                print("Reply: ", replies)
         except Exception as e:
             print(f"E: {e}")
             sys.exit(1)

@@ -94,7 +94,7 @@ if __name__ == "__main__":
                 client.exit()
                 sys.exit(0)
             elif command[0] == "HEALTH":
-                headers = ["MESIN", "FILES"]
+                headers = ["MESIN", "STATUS"]
                 all_data = []
 
                 for server in client.server_list:
